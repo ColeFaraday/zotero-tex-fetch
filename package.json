@@ -11,6 +11,7 @@
     "prefsPrefix": "extensions.zotero.texfetch"
   },
   "author": "ColeFaraday",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ColeFaraday/zotero-tex-fetch.git"
