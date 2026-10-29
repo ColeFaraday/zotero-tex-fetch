@@ -3,7 +3,9 @@
 Zotero plugin that attaches the arXiv LaTeX source of a paper as a single
 flattened `.tex` file (child attachment titled `arXiv LaTeX source (vN)`,
 tagged `_arxiv-tex`, indexed as plain text), so AI agents can read papers
-without parsing the PDF. See [PLAN.md](PLAN.md).
+without parsing the PDF. Items without arXiv metadata are looked up on
+INSPIRE by DOI or texkey, and the ID found is written to Extra. See
+[PLAN.md](PLAN.md).
 
 Right-click items → **Fetch arXiv LaTeX source**. Running it again replaces
 the attachment's contents in place when arXiv has a newer version.

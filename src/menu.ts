@@ -40,7 +40,7 @@ export function removeItemMenu(win: Window) {
 function describe(outcome: Outcome): string {
   switch (outcome.status) {
     case "no-arxiv-id":
-      return "no arXiv ID found";
+      return "no arXiv ID found (not on INSPIRE either)";
     case "pdf-only":
       return "PDF-only submission, no LaTeX source";
     case "added":

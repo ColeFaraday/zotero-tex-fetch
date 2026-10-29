@@ -4,6 +4,7 @@
 import { decodeEprint, versionFromFilename } from "./archive";
 import { findArxivId, IdSources } from "./arxiv-id";
 import { flattenSource } from "./flatten";
+import { extraWithArxiv, lookupOnInspire } from "./inspire";
 
 export const TAG = "_arxiv-tex";
 const TITLE_RE = /^arXiv LaTeX source(?: \(v(\d+)\))?$/;
@@ -22,20 +23,34 @@ export type Outcome =
       attachment: Zotero.Item;
     };
 
+function field(item: Zotero.Item, name: string): string {
+  try {
+    return String(item.getField(name as any) ?? "");
+  } catch {
+    return "";
+  }
+}
+
 function idSources(item: Zotero.Item): IdSources {
-  const field = (name: string) => {
-    try {
-      return String(item.getField(name as any) ?? "");
-    } catch {
-      return "";
-    }
-  };
   return {
-    archiveID: field("archiveID"),
-    DOI: field("DOI"),
-    extra: field("extra"),
-    url: field("url"),
+    archiveID: field(item, "archiveID"),
+    DOI: field(item, "DOI"),
+    extra: field(item, "extra"),
+    url: field(item, "url"),
   };
+}
+
+// Falls back to INSPIRE (by DOI or texkey) and records what it finds in
+// Extra, so later runs and other tools don't need the lookup.
+async function resolveArxivId(item: Zotero.Item): Promise<string | null> {
+  const local = findArxivId(idSources(item));
+  if (local) return local;
+
+  const eprint = await lookupOnInspire(field(item, "DOI"), field(item, "citationKey"));
+  if (!eprint) return null;
+  item.setField("extra", extraWithArxiv(field(item, "extra"), eprint));
+  await item.saveTx();
+  return eprint.arxivId;
 }
 
 async function throttle() {
@@ -70,7 +85,7 @@ function attachedVersion(attachment: Zotero.Item): number | null {
 }
 
 export async function fetchSourceForItem(item: Zotero.Item): Promise<Outcome> {
-  const arxivId = findArxivId(idSources(item));
+  const arxivId = await resolveArxivId(item);
   if (!arxivId) return { status: "no-arxiv-id" };
 
   const { data, version } = await download(arxivId);

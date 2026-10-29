@@ -12,6 +12,12 @@ Tooling: `zotero-plugin-scaffold` (TypeScript), same as `../zotero-cita`.
    `10.48550/arXiv.*`, `Extra` (`arXiv: …`), `arxiv.org/abs|pdf/…` URL. Support
    old-style IDs (`hep-th/9901001`). Strip any version suffix: we always
    want the latest version.
+   - **Fallback: INSPIRE.** Journal items imported from INSPIRE have only a DOI
+     and a texkey (`citationKey`). Query
+     `inspirehep.net/api/literature?q=doi:"…" or texkeys:"…"` and read
+     `arxiv_eprints`. Write the result to Extra as `arXiv:1005.0955 [hep-ph]`,
+     the same format zotero-inspire uses, so later runs skip the lookup. For
+     bulk runs, one query can OR together many DOIs and texkeys.
 2. **Look up the latest version** through the arXiv API
    (`export.arxiv.org/api/query?id_list=…`). It accepts many IDs per request,
    so a bulk run makes one call per batch, not one per item.

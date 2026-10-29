@@ -106,4 +106,35 @@ describe("tex-fetch", function () {
     )) as string;
     assert.include(text, "tex-fetch: flattened LaTeX source of arXiv:hep-th/9711200");
   });
+
+  it("finds the arXiv ID on INSPIRE from the DOI and records it in Extra", async function () {
+    const journal = await createItem("journalArticle", {
+      title: "On the gluon spectrum in the glasma",
+      DOI: "10.1016/j.nuclphysa.2010.06.009",
+    });
+    const outcome = await api().fetchSourceForItem(journal);
+    assert.equal(outcome.status, "added");
+    assert.equal(outcome.arxivId, "1005.0955");
+    assert.equal(journal.getField("extra"), "arXiv:1005.0955 [hep-ph]");
+  });
+
+  it("finds the arXiv ID on INSPIRE from the texkey alone", async function () {
+    const journal = await createItem("journalArticle", {
+      title: "Parton energy loss in glasma",
+      citationKey: "Aurenche:2012qk",
+    });
+    const outcome = await api().fetchSourceForItem(journal);
+    assert.equal(outcome.status, "added");
+    assert.equal(outcome.arxivId, "1205.6462");
+  });
+
+  it("reports no arXiv ID when INSPIRE has no match", async function () {
+    const journal = await createItem("journalArticle", {
+      title: "Unknown",
+      DOI: "10.9999/does-not-exist.12345",
+    });
+    const outcome = await api().fetchSourceForItem(journal);
+    assert.equal(outcome.status, "no-arxiv-id");
+    assert.equal(journal.getField("extra"), "");
+  });
 });
