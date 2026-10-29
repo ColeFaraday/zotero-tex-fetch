@@ -7,8 +7,12 @@ without parsing the PDF. Items without arXiv metadata are looked up on
 INSPIRE by DOI or texkey, and the ID found is written to Extra. See
 [PLAN.md](PLAN.md).
 
-Right-click items → **Fetch arXiv LaTeX source**. Running it again replaces
-the attachment's contents in place when arXiv has a newer version.
+New items get their source automatically (Settings → tex-fetch to turn this
+off; items synced from other devices are skipped). For existing items,
+right-click items → **Fetch arXiv LaTeX source**, or right-click a collection,
+saved search or My Library → **Fetch arXiv LaTeX source for this …**. Running
+it again replaces an attachment's contents in place when arXiv has a newer
+version; papers already up to date aren't downloaded again.
 
 ## Development
 

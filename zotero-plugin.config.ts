@@ -21,7 +21,7 @@ export default defineConfig({
       buildVersion: pkg.version,
     },
     fluent: { dts: false },
-    prefs: { dts: false },
+    prefs: { prefix: pkg.config.prefsPrefix, dts: false },
     esbuildOptions: [
       {
         entryPoints: ["src/index.ts"],

@@ -3,41 +3,79 @@
 
 import { normalizeArxivId } from "./arxiv-id";
 
+export interface InspireQuery {
+  doi: string;
+  texkey: string;
+}
+
 export interface InspireEprint {
   arxivId: string;
   category: string | null;
 }
 
-export function buildInspireQuery(doi: string, texkey: string): string | null {
+// Keeps each request's query string a reasonable length.
+const BATCH_SIZE = 25;
+
+export function buildInspireQuery(queries: InspireQuery[]): string | null {
   const terms: string[] = [];
-  if (doi) terms.push(`doi:"${doi.replace(/"/g, "")}"`);
-  if (texkey) terms.push(`texkeys:"${texkey.replace(/"/g, "")}"`);
+  for (const { doi, texkey } of queries) {
+    if (doi) terms.push(`doi:"${doi.replace(/"/g, "")}"`);
+    if (texkey) terms.push(`texkeys:"${texkey.replace(/"/g, "")}"`);
+  }
   return terms.length ? terms.join(" or ") : null;
 }
 
-export function parseInspireResponse(json: any): InspireEprint | null {
+// Matches hits back to the queries by DOI or texkey, since one request
+// answers a whole batch.
+export function matchInspireHits(
+  json: any,
+  queries: InspireQuery[],
+): (InspireEprint | null)[] {
+  const byDoi = new Map<string, InspireEprint>();
+  const byTexkey = new Map<string, InspireEprint>();
   for (const hit of json?.hits?.hits ?? []) {
-    const eprint = hit.metadata?.arxiv_eprints?.[0];
+    const metadata = hit.metadata ?? {};
+    const eprint = metadata.arxiv_eprints?.[0];
     const arxivId = eprint?.value ? normalizeArxivId(eprint.value) : null;
-    if (arxivId) return { arxivId, category: eprint.categories?.[0] ?? null };
+    if (!arxivId) continue;
+    const found = { arxivId, category: eprint.categories?.[0] ?? null };
+    for (const doi of metadata.dois ?? []) {
+      if (doi.value) byDoi.set(doi.value.toLowerCase(), found);
+    }
+    for (const texkey of metadata.texkeys ?? []) byTexkey.set(texkey, found);
   }
-  return null;
+  return queries.map(
+    ({ doi, texkey }) =>
+      (doi && byDoi.get(doi.toLowerCase())) || (texkey && byTexkey.get(texkey)) || null,
+  );
 }
 
 export async function lookupOnInspire(
-  doi: string,
-  texkey: string,
-): Promise<InspireEprint | null> {
-  const query = buildInspireQuery(doi, texkey);
-  if (!query) return null;
-  const url =
-    "https://inspirehep.net/api/literature?size=1&fields=arxiv_eprints&q=" +
-    encodeURIComponent(query);
-  const xhr = await Zotero.HTTP.request("GET", url, {
-    responseType: "json",
-    headers: { Accept: "application/json" },
-  });
-  return parseInspireResponse(xhr.response);
+  queries: InspireQuery[],
+): Promise<(InspireEprint | null)[]> {
+  const results: (InspireEprint | null)[] = [];
+  for (let i = 0; i < queries.length; i += BATCH_SIZE) {
+    const batch = queries.slice(i, i + BATCH_SIZE);
+    const query = buildInspireQuery(batch);
+    if (!query) {
+      results.push(...batch.map(() => null));
+      continue;
+    }
+    const url =
+      "https://inspirehep.net/api/literature?size=100&fields=arxiv_eprints,dois,texkeys&q=" +
+      encodeURIComponent(query);
+    try {
+      const xhr = await Zotero.HTTP.request("GET", url, {
+        responseType: "json",
+        headers: { Accept: "application/json" },
+      });
+      results.push(...matchInspireHits(xhr.response, batch));
+    } catch (e) {
+      Zotero.logError(e as Error);
+      results.push(...batch.map(() => null));
+    }
+  }
+  return results;
 }
 
 // Same line format the zotero-inspire plugin writes, so either can read it.

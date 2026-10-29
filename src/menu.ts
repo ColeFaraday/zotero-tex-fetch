@@ -1,81 +1,94 @@
-// Item context menu entry: "Fetch arXiv LaTeX source".
+// Context menu entries: "Fetch arXiv LaTeX source" for selected items, and
+// a bulk version for the selected collection, saved search or library.
 
-import { fetchSourceForItem, Outcome } from "./attach";
+import { fetchForItems, fetchInBulk, isBulkRunning, stopBulk } from "./runner";
 
-const MENU_ID = "texfetch-itemmenu";
-const showingHandlers = new WeakMap<Window, () => void>();
+const ITEM_MENU_ID = "texfetch-itemmenu";
+const COLLECTION_MENU_ID = "texfetch-collectionmenu";
 
-export function addItemMenu(win: _ZoteroTypes.MainWindow) {
+const cleanups = new WeakMap<Window, (() => void)[]>();
+
+function addMenuItem(
+  win: _ZoteroTypes.MainWindow,
+  popupID: string,
+  id: string,
+  onShowing: (menuitem: XUL.MenuItem) => void,
+  onCommand: () => void,
+) {
   const doc = win.document;
-  const popup = doc.getElementById("zotero-itemmenu");
-  if (!popup || doc.getElementById(MENU_ID)) return;
+  const popup = doc.getElementById(popupID);
+  if (!popup || doc.getElementById(id)) return;
 
-  const menuitem = doc.createXULElement("menuitem");
-  menuitem.id = MENU_ID;
-  menuitem.setAttribute("label", "Fetch arXiv LaTeX source");
-  menuitem.addEventListener("command", () => {
-    const items = win.ZoteroPane.getSelectedItems().filter((i) => i.isRegularItem());
-    void fetchForItems(items);
-  });
+  const menuitem = doc.createXULElement("menuitem") as XUL.MenuItem;
+  menuitem.id = id;
+  menuitem.addEventListener("command", onCommand);
   popup.appendChild(menuitem);
 
-  const onShowing = () => {
-    const anyRegular = win.ZoteroPane.getSelectedItems().some((i) => i.isRegularItem());
-    (menuitem as XUL.MenuItem).hidden = !anyRegular;
-  };
-  popup.addEventListener("popupshowing", onShowing);
-  showingHandlers.set(win, onShowing);
+  const showing = () => onShowing(menuitem);
+  popup.addEventListener("popupshowing", showing);
+  const list = cleanups.get(win) ?? [];
+  list.push(() => {
+    popup.removeEventListener("popupshowing", showing);
+    menuitem.remove();
+  });
+  cleanups.set(win, list);
 }
 
-export function removeItemMenu(win: Window) {
-  const doc = win.document;
-  doc.getElementById(MENU_ID)?.remove();
-  const onShowing = showingHandlers.get(win);
-  if (onShowing) {
-    doc.getElementById("zotero-itemmenu")?.removeEventListener("popupshowing", onShowing);
-    showingHandlers.delete(win);
-  }
+function rowKind(row: any): string | null {
+  if (!row || row.isFeed() || row.isFeeds?.()) return null;
+  if (row.isLibrary(true)) return "library";
+  if (row.isCollection()) return "collection";
+  if (row.isSearch()) return "saved search";
+  return null;
 }
 
-function describe(outcome: Outcome): string {
-  switch (outcome.status) {
-    case "no-arxiv-id":
-      return "no arXiv ID found (not on INSPIRE either)";
-    case "pdf-only":
-      return "PDF-only submission, no LaTeX source";
-    case "added":
-      return `added v${outcome.version ?? "?"}`;
-    case "updated":
-      return `updated to v${outcome.version ?? "?"}`;
-    case "up-to-date":
-      return `already up to date (v${outcome.version ?? "?"})`;
-  }
-}
+export function addMenus(win: _ZoteroTypes.MainWindow) {
+  const pane = win.ZoteroPane;
 
-export async function fetchForItems(items: Zotero.Item[]) {
-  if (!items.length) return;
+  addMenuItem(
+    win,
+    "zotero-itemmenu",
+    ITEM_MENU_ID,
+    (menuitem) => {
+      menuitem.setAttribute("label", "Fetch arXiv LaTeX source");
+      menuitem.hidden = !pane.getSelectedItems().some((i) => i.isRegularItem());
+    },
+    () => {
+      const items = pane.getSelectedItems().filter((i) => i.isRegularItem());
+      void fetchForItems(items);
+    },
+  );
 
-  const progress = new Zotero.ProgressWindow({ closeOnClick: true });
-  progress.changeHeadline("arXiv LaTeX source");
-  progress.show();
-
-  for (const item of items) {
-    const name = item.getDisplayTitle();
-    const line = new progress.ItemProgress(item.itemType, name);
-    line.setProgress(50);
-    try {
-      const outcome = await fetchSourceForItem(item);
-      line.setText(`${name}: ${describe(outcome)}`);
-      if (outcome.status === "no-arxiv-id" || outcome.status === "pdf-only") {
-        line.setError();
-      } else {
-        line.setProgress(100);
+  addMenuItem(
+    win,
+    "zotero-collectionmenu",
+    COLLECTION_MENU_ID,
+    (menuitem) => {
+      const kind = rowKind(pane.getCollectionTreeRow());
+      menuitem.hidden = !kind && !isBulkRunning();
+      menuitem.setAttribute(
+        "label",
+        isBulkRunning()
+          ? "Stop fetching arXiv LaTeX source"
+          : `Fetch arXiv LaTeX source for this ${kind}`,
+      );
+    },
+    async () => {
+      if (isBulkRunning()) {
+        stopBulk();
+        return;
       }
-    } catch (e) {
-      Zotero.logError(e as Error);
-      line.setText(`${name}: failed (${(e as Error).message})`);
-      line.setError();
-    }
-  }
-  progress.startCloseTimer(8000);
+      const row = pane.getCollectionTreeRow() as any;
+      if (!row) return;
+      const items = ((await row.getItems()) as Zotero.Item[]).filter(
+        (item) => item.isRegularItem() && !item.deleted,
+      );
+      void fetchInBulk(items, row.getName());
+    },
+  );
+}
+
+export function removeMenus(win: Window) {
+  for (const cleanup of cleanups.get(win) ?? []) cleanup();
+  cleanups.delete(win);
 }

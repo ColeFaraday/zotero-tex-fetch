@@ -26,8 +26,27 @@ async function waitForFulltextMatch(word: string, attachmentID: number) {
   return false;
 }
 
+const AUTO_FETCH_PREF = `${config.prefsPrefix}.autoFetch`;
+
+async function waitForSourceAttachment(item: Zotero.Item, ms: number) {
+  for (let waited = 0; waited < ms; waited += 500) {
+    const found = item
+      .getAttachments()
+      .map((id) => Zotero.Items.get(id) as Zotero.Item)
+      .find((attachment) => attachment.hasTag("_arxiv-tex"));
+    if (found) return found;
+    await Zotero.Promise.delay(500);
+  }
+  return null;
+}
+
 describe("tex-fetch", function () {
   this.timeout(120_000);
+
+  // The manual-run tests below would race the automatic fetch.
+  before(function () {
+    Zotero.Prefs.set(AUTO_FETCH_PREF, false, true);
+  });
 
   it("adds the context menu item", function () {
     const doc = Zotero.getMainWindow().document;
@@ -136,5 +155,90 @@ describe("tex-fetch", function () {
     const outcome = await api().fetchSourceForItem(journal);
     assert.equal(outcome.status, "no-arxiv-id");
     assert.equal(journal.getField("extra"), "");
+  });
+
+  it("fetches automatically for new items when the setting is on", async function () {
+    Zotero.Prefs.set(AUTO_FETCH_PREF, true, true);
+    try {
+      const preprint = await createItem("preprint", {
+        title: "Large N",
+        archiveID: "arXiv:hep-th/9711200",
+      });
+      const attachment = await waitForSourceAttachment(preprint, 30_000);
+      assert.exists(attachment);
+    } finally {
+      Zotero.Prefs.set(AUTO_FETCH_PREF, false, true);
+    }
+  });
+
+  it("does nothing automatically when the setting is off", async function () {
+    const preprint = await createItem("preprint", {
+      title: "Large N again",
+      archiveID: "arXiv:hep-th/9711200",
+    });
+    assert.isNull(await waitForSourceAttachment(preprint, 8_000));
+  });
+
+  describe("bulk", function () {
+    let collection: Zotero.Collection;
+    let items: Zotero.Item[];
+
+    before(async function () {
+      collection = new Zotero.Collection({ name: "Bulk test" } as any);
+      await collection.saveTx();
+      items = [
+        await createItem("journalArticle", {
+          title: "Glasma gluon spectrum (bulk)",
+          DOI: "10.1016/j.nuclphysa.2010.06.009",
+        }),
+        await createItem("journalArticle", {
+          title: "Parton energy loss (bulk)",
+          citationKey: "Aurenche:2012qk",
+        }),
+        await createItem("journalArticle", { title: "Not on arXiv (bulk)" }),
+      ];
+      for (const item of items) {
+        item.addToCollection(collection.id);
+        await item.saveTx();
+      }
+    });
+
+    it("adds the collection menu item", function () {
+      const doc = Zotero.getMainWindow().document;
+      assert.exists(doc.getElementById("texfetch-collectionmenu"));
+    });
+
+    it("lists the selected collection's items the way the menu does", async function () {
+      const pane = Zotero.getActiveZoteroPane()!;
+      await (pane.collectionsView as any).selectCollection(collection.id);
+      const row = pane.getCollectionTreeRow() as any;
+      const ids = ((await row.getItems()) as Zotero.Item[]).map((item) => item.id);
+      assert.sameMembers(ids, items.map((item) => item.id));
+    });
+
+    it("fetches every item in one run", async function () {
+      const counts = await api().fetchInBulk(items, "Bulk test");
+      assert.equal(counts.added, 2);
+      assert.equal(counts["no-arxiv-id"], 1);
+      assert.equal(counts.failed, 0);
+    });
+
+    it("downloads nothing on a second run when nothing changed", async function () {
+      const urls: string[] = [];
+      const http = Zotero.HTTP as any;
+      const original = http.request;
+      http.request = function (method: string, url: string, ...rest: any[]) {
+        urls.push(url);
+        return original.call(this, method, url, ...rest);
+      };
+      try {
+        const counts = await api().fetchInBulk(items, "Bulk test");
+        assert.equal(counts["up-to-date"], 2);
+      } finally {
+        http.request = original;
+      }
+      assert.isEmpty(urls.filter((url) => url.includes("arxiv.org/src/")));
+      assert.lengthOf(urls.filter((url) => url.includes("export.arxiv.org/api")), 1);
+    });
   });
 });

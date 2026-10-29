@@ -1,6 +1,11 @@
 import { config } from "../package.json";
 import { fetchSourceForItem } from "./attach";
-import { addItemMenu, fetchForItems, removeItemMenu } from "./menu";
+import { registerAutoFetch, unregisterAutoFetch } from "./auto";
+import { addMenus, removeMenus } from "./menu";
+import { fetchForItems, fetchInBulk } from "./runner";
+
+// Set by bootstrap.js on the script's scope.
+declare const rootURI: string;
 
 const hooks = {
   async onStartup() {
@@ -9,20 +14,27 @@ const hooks = {
       Zotero.unlockPromise,
       Zotero.uiReadyPromise,
     ]);
-    for (const win of Zotero.getMainWindows()) addItemMenu(win);
+    for (const win of Zotero.getMainWindows()) addMenus(win);
+    registerAutoFetch();
+    Zotero.PreferencePanes.register({
+      pluginID: config.addonID,
+      src: `${rootURI}content/preferences.xhtml`,
+      label: config.addonName,
+    });
     addon.data.initialized = true;
   },
 
   onMainWindowLoad(win: _ZoteroTypes.MainWindow) {
-    addItemMenu(win);
+    addMenus(win);
   },
 
   onMainWindowUnload(win: Window) {
-    removeItemMenu(win);
+    removeMenus(win);
   },
 
   onShutdown() {
-    for (const win of Zotero.getMainWindows()) removeItemMenu(win);
+    unregisterAutoFetch();
+    for (const win of Zotero.getMainWindows()) removeMenus(win);
     delete (Zotero as any)[config.addonInstance];
   },
 };
@@ -30,7 +42,7 @@ const hooks = {
 const addon = {
   data: { initialized: false },
   hooks,
-  api: { fetchSourceForItem, fetchForItems },
+  api: { fetchSourceForItem, fetchForItems, fetchInBulk },
 };
 
 (Zotero as any)[config.addonInstance] ??= addon;

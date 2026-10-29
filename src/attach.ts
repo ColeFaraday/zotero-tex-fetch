@@ -2,16 +2,13 @@
 // attachment, overwriting the existing one in place when a new version is out.
 
 import { decodeEprint, versionFromFilename } from "./archive";
+import { arxivThrottle, latestVersions } from "./arxiv-api";
 import { findArxivId, IdSources } from "./arxiv-id";
 import { flattenSource } from "./flatten";
 import { extraWithArxiv, lookupOnInspire } from "./inspire";
 
 export const TAG = "_arxiv-tex";
 const TITLE_RE = /^arXiv LaTeX source(?: \(v(\d+)\))?$/;
-
-// arXiv asks automated clients for at most one request every 3 seconds.
-const MIN_REQUEST_INTERVAL_MS = 3000;
-let lastRequestAt = 0;
 
 export type Outcome =
   | { status: "no-arxiv-id" }
@@ -41,26 +38,35 @@ function idSources(item: Zotero.Item): IdSources {
 }
 
 // Falls back to INSPIRE (by DOI or texkey) and records what it finds in
-// Extra, so later runs and other tools don't need the lookup.
-async function resolveArxivId(item: Zotero.Item): Promise<string | null> {
-  const local = findArxivId(idSources(item));
-  if (local) return local;
+// Extra, so later runs and other tools don't need the lookup. Returns a map
+// from item ID to arXiv ID; items with no arXiv ID are absent.
+export async function resolveArxivIds(items: Zotero.Item[]): Promise<Map<number, string>> {
+  const ids = new Map<number, string>();
+  const unresolved: Zotero.Item[] = [];
+  for (const item of items) {
+    const local = findArxivId(idSources(item));
+    if (local) ids.set(item.id, local);
+    else if (field(item, "DOI") || field(item, "citationKey")) unresolved.push(item);
+  }
 
-  const eprint = await lookupOnInspire(field(item, "DOI"), field(item, "citationKey"));
-  if (!eprint) return null;
-  item.setField("extra", extraWithArxiv(field(item, "extra"), eprint));
-  await item.saveTx();
-  return eprint.arxivId;
-}
-
-async function throttle() {
-  const wait = lastRequestAt + MIN_REQUEST_INTERVAL_MS - Date.now();
-  if (wait > 0) await Zotero.Promise.delay(wait);
-  lastRequestAt = Date.now();
+  const eprints = await lookupOnInspire(
+    unresolved.map((item) => ({
+      doi: field(item, "DOI"),
+      texkey: field(item, "citationKey"),
+    })),
+  );
+  for (const [i, eprint] of eprints.entries()) {
+    if (!eprint) continue;
+    const item = unresolved[i];
+    item.setField("extra", extraWithArxiv(field(item, "extra"), eprint));
+    await item.saveTx();
+    ids.set(item.id, eprint.arxivId);
+  }
+  return ids;
 }
 
 async function download(arxivId: string) {
-  await throttle();
+  await arxivThrottle();
   const xhr = await Zotero.HTTP.request("GET", `https://arxiv.org/src/${arxivId}`, {
     responseType: "arraybuffer",
   });
@@ -79,17 +85,36 @@ export function findSourceAttachment(item: Zotero.Item): Zotero.Item | undefined
     .find((attachment): attachment is Zotero.Item => !!attachment && attachment.hasTag(TAG));
 }
 
-function attachedVersion(attachment: Zotero.Item): number | null {
+export function attachedVersion(attachment: Zotero.Item): number | null {
   const m = TITLE_RE.exec(attachment.getField("title") as string);
   return m?.[1] ? Number(m[1]) : null;
 }
 
-export async function fetchSourceForItem(item: Zotero.Item): Promise<Outcome> {
-  const arxivId = await resolveArxivId(item);
+// `known` lets bulk runs pass in IDs and versions they looked up in batches;
+// anything not given is looked up here.
+export async function fetchSourceForItem(
+  item: Zotero.Item,
+  known: { arxivId?: string | null; latestVersion?: number | null } = {},
+): Promise<Outcome> {
+  const arxivId =
+    known.arxivId !== undefined
+      ? known.arxivId
+      : ((await resolveArxivIds([item])).get(item.id) ?? null);
   if (!arxivId) return { status: "no-arxiv-id" };
 
-  const { data, version } = await download(arxivId);
+  // Ask the API first so an unchanged paper isn't downloaded again.
   const existing = findSourceAttachment(item);
+  if (existing) {
+    const latest =
+      known.latestVersion !== undefined
+        ? known.latestVersion
+        : ((await latestVersions([arxivId])).get(arxivId) ?? null);
+    if (latest !== null && attachedVersion(existing) === latest) {
+      return { status: "up-to-date", arxivId, version: latest, attachment: existing };
+    }
+  }
+
+  const { data, version } = await download(arxivId);
   if (existing && version !== null && attachedVersion(existing) === version) {
     return { status: "up-to-date", arxivId, version, attachment: existing };
   }
