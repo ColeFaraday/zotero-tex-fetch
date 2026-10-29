@@ -1,7 +1,7 @@
 {
   "name": "zotero-tex-fetch",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Attach the arXiv LaTeX source of papers as a single flattened .tex file",
   "config": {
     "addonName": "tex-fetch",
