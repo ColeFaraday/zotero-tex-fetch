@@ -19,7 +19,8 @@
   "scripts": {
     "start": "zotero-plugin serve",
     "build": "zotero-plugin build && tsc --noEmit && tsc --noEmit -p test",
-    "test": "zotero-plugin test"
+    "test": "zotero-plugin test",
+    "release": "zotero-plugin release"
   },
   "devDependencies": {
     "@types/chai": "^5.2.3",

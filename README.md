@@ -26,3 +26,15 @@ npm test        # runs test/ inside a separate Zotero instance, hits arXiv
 Keep `ZOTERO_PLUGIN_KILL_COMMAND = true` in `.env`: without it the scaffold
 runs `kill -9` on every process named "zotero" when it exits, including your
 everyday Zotero.
+
+## Releasing
+
+```bash
+npm run release
+```
+
+This asks for the new version, then commits, tags `vX.Y.Z` and pushes. The tag
+starts the Release workflow, which builds the `.xpi`, attaches it to a GitHub
+release and updates `update.json` on the `release` tag (where installed copies
+check for updates).
+
