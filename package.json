@@ -1,5 +1,5 @@
 {
-  "name": "tex-fetch",
+  "name": "zotero-tex-fetch",
   "type": "module",
   "version": "0.1.0",
   "description": "Attach the arXiv LaTeX source of papers as a single flattened .tex file",
@@ -13,9 +13,9 @@
   "author": "ColeFaraday",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ColeFaraday/tex-fetch.git"
+    "url": "git+https://github.com/ColeFaraday/zotero-tex-fetch.git"
   },
-  "homepage": "https://github.com/ColeFaraday/tex-fetch",
+  "homepage": "https://github.com/ColeFaraday/zotero-tex-fetch",
   "scripts": {
     "start": "zotero-plugin serve",
     "build": "zotero-plugin build && tsc --noEmit && tsc --noEmit -p test",
