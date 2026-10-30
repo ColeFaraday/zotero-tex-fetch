@@ -1,5 +1,5 @@
 import { config } from "../package.json";
-import { fetchSourceForItem } from "./attach";
+import { fetchSourceForItem, resolveArxivIds } from "./attach";
 import { registerAutoFetch, unregisterAutoFetch } from "./auto";
 import { addMenus, removeMenus } from "./menu";
 import { fetchForItems, fetchInBulk } from "./runner";
@@ -42,7 +42,7 @@ const hooks = {
 const addon = {
   data: { initialized: false },
   hooks,
-  api: { fetchSourceForItem, fetchForItems, fetchInBulk },
+  api: { fetchSourceForItem, fetchForItems, fetchInBulk, resolveArxivIds },
 };
 
 (Zotero as any)[config.addonInstance] ??= addon;

@@ -241,4 +241,53 @@ describe("tex-fetch", function () {
       assert.lengthOf(urls.filter((url) => url.includes("export.arxiv.org/api")), 1);
     });
   });
+
+  it("resolves arXiv IDs for many INSPIRE-style items quickly", async function () {
+    // Real records that have a DOI, texkey and arXiv ID, like items imported
+    // from INSPIRE.
+    const search = await Zotero.HTTP.request(
+      "GET",
+      "https://inspirehep.net/api/literature?q=t%20glasma&size=80&fields=dois,texkeys,arxiv_eprints",
+      { responseType: "json", headers: { Accept: "application/json" } },
+    );
+    const records = (search.response.hits.hits as any[])
+      .map((hit) => hit.metadata)
+      .filter((m) => m.dois?.length && m.texkeys?.length && m.arxiv_eprints?.length);
+    assert.isAbove(records.length, 50);
+
+    const items: Zotero.Item[] = [];
+    await Zotero.DB.executeTransaction(async () => {
+      for (const m of records) {
+        const item = new Zotero.Item("journalArticle");
+        item.setField("title", `INSPIRE batch ${m.texkeys[0]}`);
+        item.setField("DOI", m.dois[0].value);
+        item.setField("citationKey" as any, m.texkeys[0]);
+        await item.save();
+        items.push(item);
+      }
+    });
+
+    const urls: string[] = [];
+    const http = Zotero.HTTP as any;
+    const original = http.request;
+    http.request = function (method: string, url: string, ...rest: any[]) {
+      urls.push(url);
+      return original.call(this, method, url, ...rest);
+    };
+    const started = Date.now();
+    let ids: Map<number, string>;
+    try {
+      ids = await api().resolveArxivIds(items);
+    } finally {
+      http.request = original;
+    }
+
+    assert.isBelow(Date.now() - started, 30_000);
+    assert.isAbove(urls.length, 1, "lookups should be split into several requests");
+    for (const [i, item] of items.entries()) {
+      assert.equal(ids.get(item.id), records[i].arxiv_eprints[0].value);
+      assert.match(item.getField("extra") as string, /^arXiv:/);
+    }
+  });
 });
+

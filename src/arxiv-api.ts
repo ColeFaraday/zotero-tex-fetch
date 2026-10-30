@@ -12,6 +12,9 @@ export async function arxivThrottle() {
   lastRequestAt = Date.now();
 }
 
+// Zotero.HTTP otherwise keeps retrying 5xx responses for up to an hour.
+export const ARXIV_HTTP_RETRY = { errorDelayMax: 60_000 };
+
 const BATCH_SIZE = 100;
 
 export function parseVersions(atom: string): Map<string, number> {
@@ -35,7 +38,10 @@ export async function latestVersions(arxivIds: string[]): Promise<Map<string, nu
       batch.join(",");
     try {
       await arxivThrottle();
-      const xhr = await Zotero.HTTP.request("GET", url, { responseType: "text" });
+      const xhr = await Zotero.HTTP.request("GET", url, {
+        responseType: "text",
+        ...ARXIV_HTTP_RETRY,
+      } as any);
       for (const [id, version] of parseVersions(xhr.responseText ?? "")) {
         versions.set(id, version);
       }

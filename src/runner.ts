@@ -119,8 +119,11 @@ function summarize(done: number, total: number, counts: Counts) {
   return [`${done}/${total}`, ...parts].join(" · ");
 }
 
-// IDs and versions are looked up in batches first, so items already up to
-// date cost no download.
+// Large runs go in chunks: look up the chunk's arXiv IDs and versions in
+// batches, then download what's needed. Progress moves from the start, Stop
+// works at any point, and items already up to date cost no download.
+const CHUNK_SIZE = 100;
+
 async function runBulk(items: Zotero.Item[], name: string): Promise<Counts> {
   const counts: Counts = {
     added: 0,
@@ -133,39 +136,54 @@ async function runBulk(items: Zotero.Item[], name: string): Promise<Counts> {
 
   const progress = new Zotero.ProgressWindow({ closeOnClick: false });
   progress.changeHeadline(`arXiv LaTeX source: ${name}`);
-  const line = new progress.ItemProgress("document", `Looking up arXiv IDs for ${items.length} items…`);
+  const line = new progress.ItemProgress("document", `0/${items.length}`);
   progress.show();
 
   let done = 0;
-  try {
-    const arxivIds = await resolveArxivIds(items);
-    const toCheck = items.filter((item) => {
-      const existing = arxivIds.has(item.id) && findSourceAttachment(item);
-      return existing && attachedVersion(existing) !== null;
-    });
-    line.setText(`Checking arXiv versions for ${toCheck.length} items…`);
-    const versions = await latestVersions(toCheck.map((item) => arxivIds.get(item.id)!));
+  const report = (activity?: string) => {
+    line.setProgress((done / items.length) * 100);
+    const summary = summarize(done, items.length, counts);
+    line.setText(activity ? `${summary} · ${activity}` : summary);
+  };
 
-    for (const item of items) {
+  for (let start = 0; start < items.length && !stopRequested; start += CHUNK_SIZE) {
+    const chunk = items.slice(start, start + CHUNK_SIZE);
+    try {
+      report("looking up arXiv IDs…");
+      const arxivIds = await resolveArxivIds(chunk);
       if (stopRequested) break;
-      const arxivId = arxivIds.get(item.id) ?? null;
-      try {
-        const outcome = await fetchSourceForItem(item, {
-          arxivId,
-          latestVersion: arxivId ? (versions.get(arxivId) ?? null) : null,
-        });
-        counts[outcome.status]++;
-      } catch (e) {
-        Zotero.logError(e as Error);
-        counts.failed++;
+
+      const toCheck = chunk.filter((item) => {
+        const existing = arxivIds.has(item.id) && findSourceAttachment(item);
+        return existing && attachedVersion(existing) !== null;
+      });
+      if (toCheck.length) report("checking arXiv versions…");
+      const versions = await latestVersions(toCheck.map((item) => arxivIds.get(item.id)!));
+
+      for (const item of chunk) {
+        if (stopRequested) break;
+        const arxivId = arxivIds.get(item.id) ?? null;
+        try {
+          const outcome = await fetchSourceForItem(item, {
+            arxivId,
+            latestVersion: arxivId ? (versions.get(arxivId) ?? null) : null,
+          });
+          counts[outcome.status]++;
+        } catch (e) {
+          Zotero.logError(e as Error);
+          counts.failed++;
+        }
+        done++;
+        report();
       }
-      done++;
-      line.setProgress((done / items.length) * 100);
-      line.setText(summarize(done, items.length, counts));
+    } catch (e) {
+      // A lookup failure loses this chunk, not the run.
+      Zotero.logError(e as Error);
+      const remaining = start + chunk.length - done;
+      counts.failed += remaining;
+      done += remaining;
+      report();
     }
-  } catch (e) {
-    Zotero.logError(e as Error);
-    line.setError();
   }
 
   const status = stopRequested ? "Stopped" : "Done";

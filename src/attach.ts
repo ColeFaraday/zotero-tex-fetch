@@ -2,7 +2,7 @@
 // attachment, overwriting the existing one in place when a new version is out.
 
 import { decodeEprint, versionFromFilename } from "./archive";
-import { arxivThrottle, latestVersions } from "./arxiv-api";
+import { ARXIV_HTTP_RETRY, arxivThrottle, latestVersions } from "./arxiv-api";
 import { findArxivId, IdSources } from "./arxiv-id";
 import { flattenSource } from "./flatten";
 import { extraWithArxiv, lookupOnInspire } from "./inspire";
@@ -55,13 +55,18 @@ export async function resolveArxivIds(items: Zotero.Item[]): Promise<Map<number,
       texkey: field(item, "citationKey"),
     })),
   );
-  for (const [i, eprint] of eprints.entries()) {
-    if (!eprint) continue;
-    const item = unresolved[i];
-    item.setField("extra", extraWithArxiv(field(item, "extra"), eprint));
-    await item.saveTx();
-    ids.set(item.id, eprint.arxivId);
+  // One transaction for the whole chunk: saving items one by one is slow on
+  // large libraries.
+  const found = eprints.flatMap((eprint, i) => (eprint ? [{ item: unresolved[i], eprint }] : []));
+  if (found.length) {
+    await Zotero.DB.executeTransaction(async () => {
+      for (const { item, eprint } of found) {
+        item.setField("extra", extraWithArxiv(field(item, "extra"), eprint));
+        await item.save();
+      }
+    });
   }
+  for (const { item, eprint } of found) ids.set(item.id, eprint.arxivId);
   return ids;
 }
 
@@ -69,7 +74,8 @@ async function download(arxivId: string) {
   await arxivThrottle();
   const xhr = await Zotero.HTTP.request("GET", `https://arxiv.org/src/${arxivId}`, {
     responseType: "arraybuffer",
-  });
+    ...ARXIV_HTTP_RETRY,
+  } as any);
   const disposition = xhr.getResponseHeader("Content-Disposition") ?? "";
   const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? "";
   return {
