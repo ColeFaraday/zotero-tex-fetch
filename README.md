@@ -14,6 +14,8 @@ saved search or My Library → **Fetch arXiv LaTeX source for this …**. Runnin
 it again replaces an attachment's contents in place when arXiv has a newer
 version; papers already up to date aren't downloaded again.
 
+**NB: This plugin was vibe-coded with Claude Opus 5.5. I have only skim-read the code. Use at your own risk.**
+
 ## Development
 
 ```bash
